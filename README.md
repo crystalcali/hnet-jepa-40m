@@ -5,17 +5,19 @@
 
 ## 1. Установка и smoke-test на Spark
 
-Используй рабочий Python с установленным CUDA PyTorch под Spark. Для
-изолированного окружения на хосте создай venv с доступом к этому PyTorch
-или используй уже настроенный NVIDIA-контейнер с GPU. Для SSH-туннеля панель
-должна быть доступна на loopback Spark. В контейнере для этого подойдёт
-существующий запуск с host network.
+На хосте начни с `python3`. Проверь, что этот интерпретатор видит CUDA PyTorch.
+Если импорт `torch` не проходит или CUDA недоступна, активируй уже настроенное
+CUDA-окружение на Spark либо зайди в NVIDIA-контейнер с доступом к GPU и
+повтори проверку там. В командах используй интерпретатор этого окружения.
+Для SSH-туннеля панель должна быть доступна на loopback Spark. В контейнере
+для этого подойдёт существующий запуск с host network.
 
 ```bash
 git clone https://github.com/crystalcali/hnet-jepa-40m.git
 cd hnet-jepa-40m
-python -m pip install -r requirements-data.txt
-python -m scripts.check_env
+python3 -c 'import torch; print(torch.__version__, torch.version.cuda); assert torch.cuda.is_available(), "CUDA unavailable"'
+python3 -m pip install -r requirements-data.txt
+python3 -m scripts.check_env
 ```
 
 Если Spark по-прежнему не видит GitHub, клонируй на доступной машине, создай
@@ -28,25 +30,25 @@ scp hnet-jepa-40m.bundle user@SPARK_HOST:~/
 ssh user@SPARK_HOST
 git clone ~/hnet-jepa-40m.bundle hnet-jepa-40m
 cd hnet-jepa-40m
-python -m pip install -r requirements-data.txt
+python3 -m pip install -r requirements-data.txt
 ```
 
 При отсутствии рабочих `causal-conv1d` и `mamba-ssm` в окружении потребуется
 совместимая сборка. В уже работающей CUDA-среде с `nvcc` и компилятором:
 
 ```bash
-python -m pip install ninja packaging wheel setuptools
-python -m pip install --no-build-isolation causal-conv1d
-python -m pip install --no-build-isolation mamba-ssm
-python -m scripts.check_env --cuda-smoke
-python -m scripts.count_params --config configs/hnet_jepa_40m.yaml
-python -m pytest -q
+python3 -m pip install ninja packaging wheel setuptools
+python3 -m pip install --no-build-isolation causal-conv1d
+python3 -m pip install --no-build-isolation mamba-ssm
+python3 -m scripts.check_env --cuda-smoke
+python3 -m scripts.count_params --config configs/hnet_jepa_40m.yaml
+python3 -m pytest -q
 ```
 
 Перед пилотом smoke-test должен успешно проверить реальный CUDA forward/backward,
 BF16 и сопоставимость Mamba-2 с CPU. Зависимости CUDA собираются под установленный
 PyTorch. Успешно проверенные версии сохрани как локальный lock-файл через
-`python -m pip freeze > requirements.spark.lock`. Если Spark работает
+`python3 -m pip freeze > requirements.spark.lock`. Если Spark работает
 без доступа к индексам пакетов, установи подготовленные для этой среды wheel
 через `pip --no-index --find-links`.
 
@@ -57,8 +59,8 @@ PyTorch. Успешно проверенные версии сохрани ка�
 исследовательского обучения.
 
 ```bash
-python -m scripts.debug_corpus --out cache/debug-fixture
-python train.py --config configs/debug.yaml --data cache/debug-fixture --run runs/debug --device cpu --debug-corpus --max-steps 5
+python3 -m scripts.debug_corpus --out cache/debug-fixture
+python3 train.py --config configs/debug.yaml --data cache/debug-fixture --run runs/debug --device cpu --debug-corpus --max-steps 5
 ```
 
 
@@ -70,10 +72,10 @@ holdout нужен отдельный двуязычный список. Рез�
 реально выполненные проверки по источникам. Шаблон поставляется пустым.
 
 ```bash
-python -m data.audit --config configs/data_sources.yaml --target-bpe 30000000 --out cache/pilot
-python -m data.pack --manifest cache/pilot/manifest.jsonl --out cache/pilot
-python train.py --config configs/pilot.yaml --data cache/pilot --run runs/c-smoke --dry-run
-python benchmark.py --config configs/pilot.yaml --data cache/pilot --steps 10 --full-objectives
+python3 -m data.audit --config configs/data_sources.yaml --target-bpe 30000000 --out cache/pilot
+python3 -m data.pack --manifest cache/pilot/manifest.jsonl --out cache/pilot
+python3 train.py --config configs/pilot.yaml --data cache/pilot --run runs/c-smoke --dry-run
+python3 benchmark.py --config configs/pilot.yaml --data cache/pilot --steps 10 --full-objectives
 ```
 
 `--dry-run` выполняет один forward/backward без шага оптимизатора. Benchmark
@@ -88,7 +90,7 @@ objective. Проверь, что есть пригодные примеры д�
 
 ```bash
 tmux new -s hnet-metrics
-python -m dashboard.server --runs runs --port 7860
+python3 -m dashboard.server --runs runs --port 7860
 ```
 
 На своём компьютере открой туннель:
@@ -108,7 +110,7 @@ ssh -N -L 7860:127.0.0.1:7860 user@SPARK_HOST
 
 ```bash
 tmux new -s hnet-pilot
-python train.py --config configs/pilot.yaml --data cache/pilot --run runs/pilot_c --max-hours 6
+python3 train.py --config configs/pilot.yaml --data cache/pilot --run runs/pilot_c --max-hours 6
 ```
 
 `Ctrl-b`, затем `d` отсоединяет терминал, `tmux attach -t hnet-pilot` возвращает.
@@ -116,7 +118,7 @@ python train.py --config configs/pilot.yaml --data cache/pilot --run runs/pilot_
 возобновления используй ту же конфигурацию, корпус, seed и горизонт экспозиции:
 
 ```bash
-python train.py --config configs/pilot.yaml --data cache/pilot --run runs/pilot_c --resume latest --max-hours 6
+python3 train.py --config configs/pilot.yaml --data cache/pilot --run runs/pilot_c --resume latest --max-hours 6
 ```
 
 `--max-hours` задаёт суммарный лимит времени запуска с учётом resume.
@@ -130,9 +132,9 @@ python train.py --config configs/pilot.yaml --data cache/pilot --run runs/pilot_
 ## 4. Генерация и оценка
 
 ```bash
-python generate.py --checkpoint runs/pilot_c/latest --mode task --iterations 8 --language ru --prompt 'Сколько будет (7+3)*5?'
-python evaluate.py --checkpoint runs/pilot_c/latest --data cache/pilot --split test --out runs/pilot_c/eval.json
-python evaluate.py --checkpoint runs/pilot_c/latest --data cache/pilot --split test --reasoning-per-level 200 --iterations 1,2,4,8,16,32
+python3 generate.py --checkpoint runs/pilot_c/latest --mode task --iterations 8 --language ru --prompt 'Сколько будет (7+3)*5?'
+python3 evaluate.py --checkpoint runs/pilot_c/latest --data cache/pilot --split test --out runs/pilot_c/eval.json
+python3 evaluate.py --checkpoint runs/pilot_c/latest --data cache/pilot --split test --reasoning-per-level 200 --iterations 1,2,4,8,16,32
 ```
 
 В параллельном train лучше не запускать генерацию на том же GPU.
