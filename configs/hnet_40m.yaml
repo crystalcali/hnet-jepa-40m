@@ -1,0 +1,8 @@
+model: B
+ff: 1664
+widths: [128, 256, 384, 512]
+depths: [6, 4, 4]
+blocks: 8
+ratio_goal: 36
+micro_pairs: 2
+grad_accum: 8

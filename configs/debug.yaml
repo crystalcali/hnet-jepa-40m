@@ -1,0 +1,9 @@
+# Engineering diagnostics only. Do not use these weights for research results.
+model: C
+ff: 96
+widths: [32, 64, 96, 128]
+depths: [1, 1, 1]
+blocks: 1
+checkpoint_core: false
+micro_pairs: 1
+grad_accum: 1

@@ -1,0 +1,46 @@
+# Only enable a source after reviewing its pinned revision, provenance, terms,
+# pairing schema and independent benchmark contamination coverage.
+sources: []
+# Source record format:
+# - name: audited_local_export
+#   path: /absolute/path/parallel_pairs.jsonl
+#   license: accepted source terms
+#   license_reviewed: true
+#   pairing_reviewed: true
+#   revision: sha256 of the original local JSONL file
+#   domain: simple  # or omit when present per row
+#
+# Remote source:
+# - name: review_first
+#   dataset: owner/dataset
+#   revision: exact Hugging Face commit SHA
+#   split: train
+#   config: optional_config
+#   en_field: translation.en
+#   ru_field: translation.ru
+#   group_field: source_document_id
+#   domain: simple
+#   license: accepted source terms
+#   license_reviewed: true
+#   pairing_reviewed: true
+#   sentence_aligned: true
+#
+# With the standardized local schema, each language is a mapping with text and
+# optional question, steps, answer, blocks, or step_byte_spans. Alignment is a
+# list of objects with en_span, ru_span, and verified=true; offsets are UTF-8 bytes.
+benchmark_holdout: null
+# Benchmark holdout: JSONL using the standardized bilingual schema, or language
+# strings. Include test prompts and their known variants in both languages.
+
+# Candidate catalog for review before enabling.
+# General: KvaytG/en-ru-parallel-20m, OPUS Books / OpenSubtitles / Tatoeba,
+# limloop/ru_en_story_pairs.
+# Education: HuggingFaceFW/finetranslations-edu, HuggingFaceFW/finetranslations.
+# Maths: mizinovmv/ru_OpenMathInstruct-2, d0rj/mathematics_dataset.
+# Logic: limloop/logic_duo.
+# Python: mizinovmv/ru_codefeedback, sup2ch/ru-en-code-curriculum.
+# Check the actual source license, original training split, pair verification,
+# benchmark overlap and nested fields. The listed IDs are candidates only.
+quality_reviewed: false
+near_dedup_reviewed: false
+benchmark_reviewed: false

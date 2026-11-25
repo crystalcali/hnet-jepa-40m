@@ -1,0 +1,4 @@
+-r requirements.txt
+datasets>=3,<6
+pyarrow>=17,<25
+sacrebleu>=2.4,<3

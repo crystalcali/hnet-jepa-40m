@@ -1,0 +1,7 @@
+model: A
+ff: 1600
+width: 512
+blocks: 10
+vocab: 16384
+micro_pairs: 2
+grad_accum: 8
