@@ -1,0 +1,6 @@
+ninja==1.13.0
+einops==0.8.1
+transformers==4.57.3
+packaging
+setuptools
+wheel

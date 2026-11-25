@@ -3,3 +3,5 @@
 !docker/spark.Dockerfile
 !requirements.txt
 !requirements-data.txt
+!requirements-spark-build.txt
+!requirements-spark-cuda.txt

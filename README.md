@@ -5,7 +5,41 @@
 
 ## 1. Окружение и CUDA smoke-test на Spark
 
-Для Spark используй Docker с NVIDIA GPU runtime. Базовый образ
+### Установка без Docker
+
+На ARM64 DGX Spark с Python 3.12 и CUDA Toolkit 13.0 выполни:
+
+```bash
+git clone https://github.com/crystalcali/hnet-jepa-40m.git
+cd hnet-jepa-40m
+bash scripts/spark-native.sh smoke
+```
+
+Если репозиторий уже клонирован, используй `git pull --ff-only` вместо
+клонирования. Установщик создаёт `.spark/venv-cu130`, загружает
+`torch==2.9.1+cu130` из официального индекса PyTorch, собирает расширения из
+исходников и проверяет CUDA. Он использует PyTorch и PyPI для загрузок.
+Существующее окружение `.venv` остаётся как есть.
+
+Если CUDA Toolkit установлен по нестандартному пути, передай его через
+`CUDA_HOME=/path/to/cuda-13.0 bash scripts/spark-native.sh smoke`. Утилита
+`nvcc` нужна для сборки. Версия CUDA в `nvidia-smi` показывает возможности
+драйвера. При ошибке создания venv нужен пакет `python3.12-venv`.
+
+После smoke-test активируй окружение для команд следующих разделов:
+
+```bash
+source .spark/venv-cu130/bin/activate
+```
+
+Панель из отдельного терминала запускается командой
+`bash scripts/spark-native.sh dashboard --port 7860`. Для обучения можно
+использовать активированное окружение или
+`bash scripts/spark-native.sh run python3 train.py ...`.
+
+### Установка через NVIDIA Docker
+
+Для контейнерного варианта используй Docker с NVIDIA GPU runtime. Базовый образ
 `nvcr.io/nvidia/pytorch:25.11-py3` содержит CUDA PyTorch и CUDA Toolkit.
 При первой сборке установщик добавляет зависимости проекта в образ и собирает
 закреплённые версии Mamba-2 и causal-conv1d под этот PyTorch. Системный Python
@@ -22,7 +56,7 @@ bash scripts/spark.sh smoke
 Она проверяет прямой и обратный проход, BF16 и сопоставимость Mamba-2 с CPU.
 Для пересборки образа есть `bash scripts/spark.sh build`.
 
-Для команд следующих разделов на Spark открой оболочку контейнера.
+При установке через Docker для команд следующих разделов открой оболочку контейнера.
 Исходники, `cache/`, `runs/` и чекпоинты остаются в каталоге на хосте.
 
 ```bash
@@ -101,7 +135,14 @@ ssh -N -L 7860:127.0.0.1:7860 user@SPARK_HOST
 пишутся нормы и попарные косинусы градиентов, а также снимок латентов и
 границ на фиксированной пробе. Интервал меняется через `--probe-every`.
 
-В отдельной сессии Spark запусти обучение через контейнер:
+В отдельной сессии Spark запусти обучение. Для установки без Docker:
+
+```bash
+tmux new -s hnet-pilot
+bash scripts/spark-native.sh run python3 train.py --config configs/pilot.yaml --data cache/pilot --run runs/pilot_c --max-hours 6
+```
+
+Для установки через Docker:
 
 ```bash
 tmux new -s hnet-pilot
