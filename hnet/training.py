@@ -9,7 +9,7 @@ from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
 
 from .data import conditional_batch, lm_batch, pad
-from .losses import ablation_loss, corrupt_bytes, cross_loss, dynamics_index, interpolate, routing_loss, sigreg
+from .losses import ablation_loss, corrupt_bytes, cross_loss, dynamics_index, dynamics_loss, interpolate, routing_loss, sigreg
 
 
 def amp(device):
