@@ -7,7 +7,7 @@ from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
 
 from .data import conditional_batch, lm_batch, pad
-from .losses import ablation_loss, corrupt_bytes, cross_loss, dynamics_loss, interpolate, routing_loss, sigreg
+from .losses import ablation_loss, corrupt_bytes, cross_loss, dynamics_index, interpolate, routing_loss, sigreg
 
 
 def amp(device):
@@ -76,9 +76,9 @@ def eligible_tasks(rows, rng):
 def dynamics_objective(model, codec, items, K, device, task_cache):
     losses, continuations, h_samples = [], [], []
     for prompt, stages, lang, answer in items:
-        selected = sorted({(iteration * len(stages) + 7) // 8 - 1 for iteration in range(1, K + 1)})
-        # Repeat selected outputs by using the original index equation for all K.
-        effective = encode_stages(model, codec, [stages[j] for j in selected], lang, device)
+        indices = [dynamics_index(iteration, len(stages)) for iteration in range(1, K + 1)]
+        selected = sorted(set(indices))
+        z, zmask = encode_stages(model, codec, [stages[j] for j in selected], lang, device)
         chosen = {step: idx for idx, step in enumerate(selected)}
         key = (prompt, answer, lang, lang, True)
         if key in task_cache:
@@ -88,11 +88,8 @@ def dynamics_objective(model, codec, items, K, device, task_cache):
                                         terminal=True)
             trajectory = model.reason(prompt_state.latents[-1], K, trajectory=True)
             mask = prompt_state.valid
-        # dynamics_loss maps K iterations onto at least eight slots. Instead use
-        # the original stage count with repeated selections expanded in place.
-        expand = [chosen.get(j, 0) for j in range(len(stages))]
-        z, zmask = effective
-        losses.append(dynamics_loss(model, trajectory, mask, z[expand], zmask[expand]))
+        takes = [chosen[i] for i in indices]
+        losses.append(dynamics_loss(model, trajectory, mask, z[takes], zmask[takes]))
         h_samples.append((lang, trajectory[-1][mask]))
         if answer is None:
             # Natural-block continuation uses the corresponding causal prompt memory.
@@ -159,7 +156,11 @@ def batch_objectives(model, codec, rows, K, weights, rng, device, progress, lm_s
         coverage["translation"] = len(translations)
     task_cache = {}
     if weights["task"] and tasks and rng.random() < .5:
-        terms["task"], _ = conditional(model, codec, tasks, K, device, rng)
+        terms["task"], states = conditional(model, codec, tasks, K, device, rng)
+        if states:
+            trajectory, valid = states
+            task_cache = {task: ([state[i:i+1] for state in trajectory], valid[i:i+1])
+                          for i, task in enumerate(tasks)}
         coverage["task"] = len(tasks)
     if is_hnet and model.recurrent and weights["dynamics"] and dynamics and rng.random() < .25:
         terms["dynamics"], language_continuation, _ = dynamics_objective(

@@ -35,7 +35,7 @@ class ReferenceMamba2(nn.Module):
         x = x.reshape(batch, length, self.heads, self.head_dim)
         dt = F.softplus(dt.float() + self.dt_bias.float())
         decay = torch.exp(-torch.exp(self.A_log.float()) * dt)
-        state = x.new_zeros(batch, self.heads, self.head_dim, self.state_size)
+        state = x.new_zeros((batch, self.heads, self.head_dim, self.state_size))
         output = []
         for i in range(length):
             u = x[:, i]

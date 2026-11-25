@@ -31,3 +31,16 @@ sources: []
 benchmark_holdout: null
 # Benchmark holdout: JSONL using the standardized bilingual schema, or language
 # strings. Include test prompts and their known variants in both languages.
+
+# Candidate catalog for review before enabling.
+# General: KvaytG/en-ru-parallel-20m, OPUS Books / OpenSubtitles / Tatoeba,
+# limloop/ru_en_story_pairs.
+# Education: HuggingFaceFW/finetranslations-edu, HuggingFaceFW/finetranslations.
+# Maths: mizinovmv/ru_OpenMathInstruct-2, d0rj/mathematics_dataset.
+# Logic: limloop/logic_duo.
+# Python: mizinovmv/ru_codefeedback, sup2ch/ru-en-code-curriculum.
+# Check the actual source license, original training split, pair verification,
+# benchmark overlap and nested fields. The listed IDs are candidates only.
+quality_reviewed: false
+near_dedup_reviewed: false
+benchmark_reviewed: false

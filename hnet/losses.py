@@ -206,9 +206,8 @@ def dynamics_index(iteration, stages):
 def dynamics_loss(model, trajectory, prompt_valid, targets, target_valid):
     with torch.autocast(prompt_valid.device.type, enabled=False):
         target = masked_mean(targets, target_valid)
-        indices = [dynamics_index(k, len(target)) for k in range(1, len(trajectory) + 1)]
         predictions = [model.dyn_predictor(masked_mean(h, prompt_valid)) for h in trajectory]
-        return F.mse_loss(torch.cat(predictions), target[indices])
+        return F.mse_loss(torch.cat(predictions), target)
 
 
 def sigreg(x, seed, slices=128, knots=17, maximum=3.):

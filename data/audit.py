@@ -212,7 +212,7 @@ def audit(args):
             coverage[split + "_verified_spans"] += sum(bool(span.get("verified")) for span in item["alignment"])
             coverage[split + "_task_sides"] += sum(bool(item[lang].get("question") and item[lang].get("answer"))
                                                   for lang in ("en", "ru"))
-            coverage[split + "_trace_sides"] += sum(bool(item[lang].get("steps") or item[lang].get("blocks"))
+            coverage[split + "_trace_sides"] += sum(bool((item[lang].get("question") and item[lang].get("answer") and item[lang].get("steps")) or len(item[lang].get("blocks") or []) > 1)
                                                    for lang in ("en", "ru"))
             splits[split].write(json.dumps(item, ensure_ascii=False) + "\n")
             manifest.write(json.dumps({key: item[key] for key in (
@@ -225,16 +225,20 @@ def audit(args):
     deficits = {name: max(0, targets[name] - totals[name]) for name in DOMAINS}
     declared_coverage = bool(config.get("benchmark_reviewed") and holdout)
     checks = bool(config.get("near_dedup_reviewed") and config.get("quality_reviewed"))
+    objective_coverage = all(coverage[name] for name in (
+        "train_verified_spans", "train_task_sides", "train_trace_sides", "val_pairs"
+    ))
     audit_result = {
         "target_bpe": args.target_bpe, "train_bpe": sum(totals.values()), "targets": targets,
         "domain_bpe": dict(totals), "available_bytes": available_bytes, "deficits": deficits,
         "accepted_by_source": accepted, "rejections": rejected, "coverage": coverage,
         "benchmark_exact_hashes": len(holdout), "benchmark_variants_reviewed": declared_coverage,
+        "required_objective_coverage": objective_coverage,
         "near_dedup_and_quality_reviewed": checks, "truncated_scan": bool(args.max_rows),
         "tokenizer_sha256": sha256_file(tokenizer_path), "manifest_sha256": sha256_file(root / "manifest.jsonl"),
         "split_sha256": {name: sha256_file(root / f"{name}.jsonl") for name in splits},
         "approved_for_research": (
-            not any(deficits.values()) and not args.max_rows and declared_coverage and checks
+            not any(deficits.values()) and not args.max_rows and declared_coverage and checks and objective_coverage
             and bool(args.target_bpe < 1_000_000_000 or args.tokenizer)
         ),
     }
