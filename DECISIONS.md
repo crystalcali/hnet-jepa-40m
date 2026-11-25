@@ -15,7 +15,7 @@
   The supplied catalog starts with no source enabled. It makes no licensing,
   quota or quality assertion.
 - The runnable evaluator covers held-out BPB, basic retrieval/rank and the
-  paired bilingual reasoning generator. Full third-party benchmark adapters,
-  translation metrics, language-ID probes and visualization of internal
-  trajectories are outstanding. The live dashboard covers the actual training
-  journal without consuming GPU memory.
+  paired bilingual reasoning generator, and reads pinned normalized benchmark
+  exports for continuation ranking, exact match, chrF++ and BLEU. Dataset-specific
+  ingestion, code-execution benchmarks, language-ID probes and interactive internal
+  trajectories are outstanding. Live metrics are read from the training journal.

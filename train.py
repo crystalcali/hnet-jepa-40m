@@ -16,6 +16,7 @@ from safetensors.torch import save_file
 import torch
 import yaml
 
+from hnet.compute import ComputeEstimate
 from hnet.data import Codec, CurriculumSampler, PairCache, lm_batch, sha256_file
 from hnet.losses import loss_weights
 from hnet.model import build_model, count_parameters
@@ -147,6 +148,15 @@ def gpu_memory(device):
 
 
 def update(model, optimizer, codec, rows, device, rng, K, progress, micro, config, step):
+    with ComputeEstimate(model) as estimate:
+        result = accumulate(model, optimizer, codec, rows, device, rng, K, progress, micro, config, step)
+    # The forward is counted with replayed layers. A 2x backward estimate
+    # approximates training for contractions; this is not a hardware counter.
+    result["estimated_training_flops"] = 3 * estimate.flops
+    return result
+
+
+def accumulate(model, optimizer, codec, rows, device, rng, K, progress, micro, config, step):
     segments = [rows[start:start+micro] for start in range(0, len(rows), micro)]
     byte_count = sum(sum(len(codec.content(row[lang]["text"])) + 1 for lang in ("en", "ru")) for row in rows)
     weights = loss_weights(progress)
@@ -282,7 +292,7 @@ def main():
     if args.resume:
         state = load_state(args.resume, root, model, optimizer, sampler, identity, device, rng)
     else:
-        state = {"step": 0, "elapsed": 0., "micro": config.get("micro_pairs", 2)}
+        state = {"step": 0, "elapsed": 0., "micro": config.get("micro_pairs", 2), "estimated_flops": 0}
         (root / "run.json").write_text(json.dumps(identity | {"horizon": horizon, "parameters": total}, indent=2), encoding="utf-8")
     started = time.monotonic()
     prior_elapsed = state["elapsed"]
@@ -290,7 +300,7 @@ def main():
     pairs = config.get("micro_pairs", 2) * config.get("grad_accum", 8)
     model.train()
     json_line(log, {"kind": "status", "step": state["step"], "status": "running", "resumed": bool(args.resume),
-                    "at": datetime.now(timezone.utc).isoformat()})
+                    "diagnostic": args.debug_corpus, "at": datetime.now(timezone.utc).isoformat()})
     try:
         if not args.resume and hasattr(model, "routers"):
             json_line(log, {"kind": "calibration", "step": 0, "thresholds": calibrate_router(model, codec, cache, device)})
@@ -326,6 +336,7 @@ def main():
                                 progress, state["micro"], config, state["step"] + 1)
             optimizer.step()
             state["step"] += 1
+            state["estimated_flops"] = state.get("estimated_flops", 0) + report["estimated_training_flops"]
             now = time.monotonic()
             state["elapsed"] = now - started + prior_elapsed
             seconds = now - batch_started
@@ -333,7 +344,8 @@ def main():
             json_line(log, {"kind": "train", "step": state["step"], "elapsed": state["elapsed"], "progress": progress,
                             "bpe": sampler.exposure, "source_bytes_step": bytes_seen, "source_bytes_per_s": bytes_seen / seconds,
                             "step_s": seconds, "K": iterations, "gpu_gib": gpu_memory(device),
-                            "micro_pairs": state["micro"], "domain_bpe": sampler.domain_exposure,
+                            "micro_pairs": state["micro"], "estimated_flops_total": state["estimated_flops"],
+                            "diagnostic": args.debug_corpus, "domain_bpe": sampler.domain_exposure,
                             "domain_reshuffles": sampler.epochs, **report})
             reached = any(before < point <= sampler.exposure for point in MILESTONES)
             if reached or now - last_save >= 300 or state["step"] % 500 == 0:

@@ -52,6 +52,16 @@ PyTorch. Успешно проверенные версии сохрани ка�
 
 ## 2. Корпус и короткая проверка
 
+Можно сразу проверить весь цикл и панель на отдельной синтетической фикстуре,
+в том числе на CPU. Она маркируется как диагностика и блокируется для
+исследовательского обучения.
+
+```bash
+python -m scripts.debug_corpus --out cache/debug-fixture
+python train.py --config configs/debug.yaml --data cache/debug-fixture --run runs/debug --device cpu --debug-corpus --max-steps 5
+```
+
+
 Заполни `configs/data_sources.yaml` готовыми RU–EN парами с проверенными
 лицензиями, схемой выравнивания и зафиксированными ревизиями. Для benchmark
 holdout нужен отдельный двуязычный список. Результат аудита и дефициты по
@@ -126,3 +136,19 @@ python evaluate.py --checkpoint runs/pilot_c/latest --data cache/pilot --split t
 В параллельном train лучше не запускать генерацию на том же GPU.
 Для проверки на CPU можно добавить `--device cpu`, короткий контекст и
 небольшое число примеров. K=16 и 32 — экстраполяция глубины.
+
+### Стандартные бенчмарки
+
+`evaluate.py --benchmark /path/to/heldout.jsonl` принимает нормализованную
+валидированную выгрузку. Путь и SHA выгрузки фиксируй отдельно от train. На
+одну задачу нужна строка с `dataset`, `id`, `language`, `prompt` и `kind`.
+
+| kind | Поля и оценка |
+|---|---|
+| choice | `choices`, `answer_index`. Суммарная условная log-likelihood или `score: "per_byte"`. Для BLiMP, RuBLiMP и HellaSwag. |
+| exact | `answer`, при необходимости `mode: "lm"`, `compare: "integer"` или `compare: "normalized_text"`. Для LAMBADA, GSM8K, MGSM и логики при соответствующей подготовке эталона. |
+| translation | `answer`, `source_language`, `language` как язык ответа. BLEU и chrF++ для готовых пар FLORES. |
+
+`max_bytes` ограничивает генерацию, по умолчанию 128. Для benchmark с
+выбором варианта ранжируются одинаковые строки. Для режима генерации явно
+укажи `--benchmark-iterations`. Код оценки не исполняет содержимое датасета.

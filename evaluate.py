@@ -11,6 +11,7 @@ import time
 import torch
 
 from generate import generate, load_model
+from hnet.benchmarks import plain_benchmarks
 from hnet.data import PairCache, lm_batch, sha256_file
 from hnet.synthetic_eval import tasks
 from hnet.training import amp, nll
@@ -118,6 +119,8 @@ def main():
     parser.add_argument("--reasoning-per-level", type=int, default=0)
     parser.add_argument("--mode", choices=("lm", "task", "both"), default="task")
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--benchmark", type=Path, help="Pinned benchmark export in normalized JSONL")
+    parser.add_argument("--benchmark-iterations", type=int, default=1)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
     model, codec, config = load_model(args.checkpoint, torch.device(args.device))
@@ -125,6 +128,12 @@ def main():
     if sha256_file(args.data / f"{args.split}.jsonl") != cache.meta["split_sha256"][args.split]:
         raise SystemExit("Evaluation split checksum mismatch")
     result = language_eval(model, codec, cache, torch.device(args.device), args.limit_pairs)
+    if args.benchmark:
+        result["benchmarks"] = {
+            "input_sha256": sha256_file(args.benchmark),
+            "iterations": args.benchmark_iterations,
+            "results": plain_benchmarks(model, codec, args.benchmark, args.benchmark_iterations),
+        }
     if args.reasoning_per_level:
         ks = [int(x) for x in args.iterations.split(",")] if config["model"] == "C" else [1]
         modes = ("lm", "task") if args.mode == "both" else (args.mode,)

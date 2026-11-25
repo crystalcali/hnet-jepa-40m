@@ -106,7 +106,7 @@ function render(data){
   const valid=data.events.filter(r=>r.kind==="validation");
   const state=statuses[status?.status]||"Есть файл метрик";
   const age=Math.max(0,Math.round(Date.now()/1000-data.last_modified));
-  byId("status").textContent=state+" · обновление "+fmt(age,0)+" с назад";
+  byId("status").textContent=state+(latest.diagnostic||status?.diagnostic?" · диагностика":"")+" · обновление "+fmt(age,0)+" с назад";
   byId("status").dataset.error=String(status?.status==="error");
   byId("message").textContent=status?.error||(!trains.length?"Первый шаг ещё не записан.":"");
   byId("body").hidden=false;
