@@ -14,7 +14,7 @@ def test_dry_smoke_resume_and_export(tmp_path, monkeypatch):
     data = tmp_path / "corpus"
     make_fixture(data)
     base = ["train.py", "--config", "configs/debug.yaml", "--data", str(data), "--device", "cpu",
-            "--debug-corpus", "--schedule-bpe", "100000"]
+            "--debug-corpus", "--schedule-bpe", "100000", "--probe-every", "1"]
     run = tmp_path / "run"
     monkeypatch.setattr(sys, "argv", base + ["--run", str(run), "--max-steps", "1"])
     train.main()
@@ -25,6 +25,7 @@ def test_dry_smoke_resume_and_export(tmp_path, monkeypatch):
     assert [event["step"] for event in train_events] == [1, 2]
     assert train_events[0]["bpe"] < train_events[1]["bpe"]
     assert train_events[1]["estimated_training_flops"] > 0
+    assert (run / "probes" / "step-000000002.npz").is_file()
     control = tmp_path / "uninterrupted"
     monkeypatch.setattr(sys, "argv", base + ["--run", str(control), "--max-steps", "2"])
     train.main()

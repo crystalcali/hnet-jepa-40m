@@ -127,3 +127,33 @@ def test_rng_fixture_for_recurrence():
         twice = model.reason(enc.latents[-1], K=2, trajectory=True)
         torch.testing.assert_close(once, twice[0])
     assert count_parameters(model) == before
+
+
+def test_objectives_propagate_gradients():
+    import random
+    from hnet.losses import loss_weights
+    from hnet.training import batch_objectives
+
+    class Draw(random.Random):
+        def random(self):
+            return .1
+
+    model = small()
+    for router in model.routers:
+        router.threshold.fill_(-.01)
+    en, ru = "One plus one is 2.", "Один плюс один = 2."
+    row = {"en": {"text": en, "question": "1+1?", "steps": ["Add."], "answer": "2"},
+           "ru": {"text": ru, "question": "1+1?", "steps": ["Сложи."], "answer": "2"},
+           "alignment": [{"en_span": [0, len(en.encode())], "ru_span": [0, len(ru.encode())],
+                          "verified": True}]}
+    total, losses, _, _, _ = batch_objectives(
+        model, Codec(), [row], 2, loss_weights(.7), Draw(5), torch.device("cpu"), .7, 1.
+    )
+    assert {"global", "local", "ablation", "dynamics", "translation", "task", "aux"} <= set(losses)
+    gradients = torch.autograd.grad(losses["global"] + losses["local"],
+                                    tuple(router.query.weight for router in model.routers),
+                                    retain_graph=True)
+    assert sum(float(grad.abs().sum()) for grad in gradients) > 0.
+    total.backward()
+    for head in (model.dyn_predictor, model.cross_predictors[0][0], model.abl_predictors[-1]):
+        assert head.weight.grad is not None and torch.isfinite(head.weight.grad).all()

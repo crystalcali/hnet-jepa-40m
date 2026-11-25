@@ -18,6 +18,7 @@ import yaml
 
 from hnet.compute import ComputeEstimate
 from hnet.data import Codec, CurriculumSampler, PairCache, lm_batch, sha256_file
+from hnet.diagnostics import probe, select_probe
 from hnet.losses import loss_weights
 from hnet.model import build_model, count_parameters
 from hnet.training import amp, batch_objectives, lr_at, nll, sigreg_step
@@ -233,6 +234,7 @@ def main():
     parser.add_argument("--max-hours", type=float)
     parser.add_argument("--max-steps", type=int)
     parser.add_argument("--schedule-bpe", type=int)
+    parser.add_argument("--probe-every", type=int, default=200)
     parser.add_argument("--resume")
     parser.add_argument("--debug-corpus", action="store_true")
     parser.add_argument("--full", action="store_true")
@@ -299,6 +301,7 @@ def main():
     val = PairCache(args.data, "val")
     pairs = config.get("micro_pairs", 2) * config.get("grad_accum", 8)
     model.train()
+    monitor_rows = select_probe(cache) if hasattr(model, "routers") and args.probe_every > 0 else []
     json_line(log, {"kind": "status", "step": state["step"], "status": "running", "resumed": bool(args.resume),
                     "diagnostic": args.debug_corpus, "at": datetime.now(timezone.utc).isoformat()})
     try:
@@ -347,6 +350,13 @@ def main():
                             "micro_pairs": state["micro"], "estimated_flops_total": state["estimated_flops"],
                             "diagnostic": args.debug_corpus, "domain_bpe": sampler.domain_exposure,
                             "domain_reshuffles": sampler.epochs, **report})
+            if monitor_rows and state["step"] % args.probe_every == 0:
+                try:
+                    result = probe(model, codec, monitor_rows, device, progress, iterations, root, state["step"])
+                except torch.cuda.OutOfMemoryError:
+                    result = {"kind": "probe_skipped", "step": state["step"], "reason": "CUDA OOM"}
+                if result:
+                    json_line(log, result)
             reached = any(before < point <= sampler.exposure for point in MILESTONES)
             if reached or now - last_save >= 300 or state["step"] % 500 == 0:
                 path = checkpoint(root, state, model, optimizer, sampler, identity, config, args.data, device, rng, reached)

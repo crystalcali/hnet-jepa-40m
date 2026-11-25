@@ -76,7 +76,10 @@ def plain_benchmarks(model, codec, path, iterations=1):
                 references[key].append(row["answer"])
             else:
                 compare = row.get("compare", "exact")
-                correct[key] += int(normalize(out["text"], compare) == normalize(row["answer"], compare))
+                expected = normalize(row["answer"], compare)
+                if expected is None:
+                    raise ValueError(f"Invalid benchmark reference: {dataset}/{row['id']}")
+                correct[key] += int(normalize(out["text"], compare) == expected)
         else:
             raise ValueError(f"Unknown benchmark kind: {task}")
     result = {}
