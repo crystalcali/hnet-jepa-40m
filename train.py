@@ -21,7 +21,7 @@ from hnet.data import Codec, CurriculumSampler, PairCache, lm_batch, sha256_file
 from hnet.diagnostics import probe, select_probe
 from hnet.losses import loss_weights
 from hnet.model import build_model, count_parameters
-from hnet.training import amp, batch_objectives, lr_at, nll, sigreg_step
+from hnet.training import amp, batch_objectives, generative_rng, lr_at, nll, sigreg_step
 
 STOP = False
 MILESTONES = (1_000_000, 3_000_000, 10_000_000, 30_000_000, 100_000_000, 300_000_000, 1_000_000_000)
@@ -168,8 +168,9 @@ def accumulate(model, optimizer, codec, rows, device, rng, K, progress, micro, c
         weight = len(group) / len(rows)
         count = sum(sum(len(codec.content(row[lang]["text"])) + 1 for lang in ("en", "ru")) for row in group)
         with amp(device):
+            gen = generative_rng(group, step, config.get("runtime_seed", 42))
             _, terms, weighted, counts, debug = batch_objectives(
-                model, codec, group, K, weights, rng, device, progress, count / byte_count
+                model, codec, group, K, weights, rng, device, progress, count / byte_count, gen_rng=gen
             )
             loss = sum(value if name in ("byte", "aux") else value * weight for name, value in weighted.items())
         if not torch.isfinite(loss):
@@ -240,7 +241,7 @@ def main():
     parser.add_argument("--full", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    config = yaml.safe_load(args.config.read_text())
+    config = yaml.safe_load(args.config.read_text()) | {"runtime_seed": args.seed}
     device = torch.device(args.device)
     hours = args.max_hours if args.max_hours is not None else (72. if args.full else 6.)
     if not 0 < hours <= 72 or (args.max_steps is not None and args.max_steps < 1):

@@ -1,6 +1,8 @@
 """Shared forward paths for training, validation and diagnostics."""
 from contextlib import nullcontext
+import hashlib
 import math
+import random
 
 import torch
 from torch.nn import functional as F
@@ -73,16 +75,16 @@ def eligible_tasks(rows, rng):
     return translations, tasks, dynamics
 
 
-def dynamics_objective(model, codec, items, K, device, task_cache):
-    losses, continuations, h_samples = [], [], []
+def dynamics_objective(model, codec, items, K, device, prompt_cache):
+    losses = []
     for prompt, stages, lang, answer in items:
         indices = [dynamics_index(iteration, len(stages)) for iteration in range(1, K + 1)]
         selected = sorted(set(indices))
         z, zmask = encode_stages(model, codec, [stages[j] for j in selected], lang, device)
         chosen = {step: idx for idx, step in enumerate(selected)}
-        key = (prompt, answer, lang, lang, True)
-        if key in task_cache:
-            trajectory, mask = task_cache[key]
+        key = (prompt, lang, bool(answer))
+        if key in prompt_cache:
+            trajectory, mask = prompt_cache[key]
         else:
             prompt_state = model.encode(pad([codec.ids(prompt, lang, task=bool(answer))], codec.pad, device),
                                         terminal=True)
@@ -90,15 +92,7 @@ def dynamics_objective(model, codec, items, K, device, task_cache):
             mask = prompt_state.valid
         takes = [chosen[i] for i in indices]
         losses.append(dynamics_loss(model, trajectory, mask, z[takes], zmask[takes]))
-        h_samples.append((lang, trajectory[-1][mask]))
-        if answer is None:
-            # Natural-block continuation uses the corresponding causal prompt memory.
-            _, prefix, labels = conditional_batch(codec, [(prompt, stages[0], lang, lang, False)], device)
-            target = model.encode(prefix)
-            continuations.append(nll(model.condition_decode(target, trajectory[-1], mask), labels))
-    return torch.stack(losses).mean(), (
-        torch.stack(continuations).mean() if continuations else None
-    ), h_samples
+    return torch.stack(losses).mean()
 
 
 def encode_stages(model, codec, stages, lang, device):
@@ -108,7 +102,8 @@ def encode_stages(model, codec, stages, lang, device):
     return states.latents[-1], valid
 
 
-def batch_objectives(model, codec, rows, K, weights, rng, device, progress, lm_scale):
+def batch_objectives(model, codec, rows, K, weights, rng, device, progress, lm_scale, gen_rng=None):
+    gen_rng = gen_rng or rng
     ids, labels, texts = lm_batch(codec, rows, device)
     is_hnet = hasattr(model, "routers")
     terms, coverage, debug = {}, {}, {}
@@ -149,31 +144,44 @@ def batch_objectives(model, codec, rows, K, weights, rng, device, progress, lm_s
         if loss is not None:
             terms["ablation"] = loss
             coverage["ablation"] = len(sides)
-    translations, tasks, dynamics = eligible_tasks(rows, rng)
+    translations, tasks, dynamics = eligible_tasks(rows, gen_rng)
     coverage.update(translation_eligible=len(translations), task_eligible=len(tasks), dynamics_eligible=len(dynamics))
-    if weights["translation"] and translations and rng.random() < .5:
+    if weights["translation"] and translations and gen_rng.random() < .5:
         terms["translation"], _ = conditional(model, codec, translations, K, device, rng)
         coverage["translation"] = len(translations)
-    task_cache = {}
-    if weights["task"] and tasks and rng.random() < .5:
+    prompt_cache = {}
+    if weights["task"] and tasks and gen_rng.random() < .5:
         terms["task"], states = conditional(model, codec, tasks, K, device, rng)
-        if states:
-            trajectory, valid = states
-            task_cache = {task: ([state[i:i+1] for state in trajectory], valid[i:i+1])
-                          for i, task in enumerate(tasks)}
+        gather_memories(prompt_cache, tasks, states)
         coverage["task"] = len(tasks)
-    if is_hnet and model.recurrent and weights["dynamics"] and dynamics and rng.random() < .25:
-        terms["dynamics"], language_continuation, _ = dynamics_objective(
-            model, codec, dynamics, K, device, task_cache
-        )
-        coverage["dynamics"] = len(dynamics)
-        if language_continuation is not None:
-            terms["continuation"] = language_continuation
+    if weights["dynamics"] and dynamics and gen_rng.random() < .25:
+        continuations = [(prompt, stages[0], lang, lang, False)
+                         for prompt, stages, lang, answer in dynamics if answer is None]
+        if continuations:
+            terms["continuation"], states = conditional(model, codec, continuations, K, device, rng)
+            gather_memories(prompt_cache, continuations, states)
+            coverage["continuation"] = len(continuations)
+        if is_hnet and model.recurrent:
+            terms["dynamics"] = dynamics_objective(model, codec, dynamics, K, device, prompt_cache)
+            coverage["dynamics"] = len(dynamics)
     probabilities = {"ablation": .5, "dynamics": .25, "translation": .5, "task": .5, "continuation": .25}
     multipliers = {**weights, "byte": lm_scale, "aux": .25 * lm_scale, "continuation": 1.}
     weighted = {name: item * (multipliers[name] / probabilities.get(name, 1.))
                 for name, item in terms.items()}
     return sum(weighted.values()), terms, weighted, coverage, debug
+
+
+def gather_memories(cache, examples, states):
+    if states is None:
+        return
+    trajectory, valid = states
+    for index, (prompt, _, lang, _, task) in enumerate(examples):
+        cache[prompt, lang, task] = ([state[index:index+1] for state in trajectory], valid[index:index+1])
+
+
+def generative_rng(rows, step, seed):
+    identity = "\0".join([str(seed), str(step), *(row["pair_id"] for row in rows)])
+    return random.Random(int.from_bytes(hashlib.sha256(identity.encode()).digest()[:8], "big"))
 
 
 def sigreg_step(model, micro_inputs, step, device, minimum=256):
