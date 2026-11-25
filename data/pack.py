@@ -3,7 +3,7 @@ import argparse
 import json
 from pathlib import Path
 
-from hnet.data import sha256_file
+from hnet.corpus import sha256_file
 
 
 def main():

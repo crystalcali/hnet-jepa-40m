@@ -11,7 +11,7 @@ import unicodedata
 from tokenizers import Tokenizer
 import yaml
 
-from hnet.data import Codec, DOMAINS, QUOTAS, sha256_file, train_tokenizer
+from hnet.corpus import Codec, DOMAINS, QUOTAS, sha256_file, train_tokenizer
 
 
 def fingerprint(text):
@@ -26,6 +26,10 @@ def field(row, dotted):
 
 
 def source_rows(source):
+    if source.get('pilot_adapter'):
+        from data.pilot_sources import rows
+        yield from rows(source)
+        return
     if source.get("path"):
         path = Path(source["path"]).expanduser()
         if sha256_file(path) != source["revision"]:
@@ -183,7 +187,7 @@ def audit(args):
     else:
         def texts():
             for domain in DOMAINS:
-                cursor = db.execute("SELECT data FROM pairs WHERE split='train' AND domain=? LIMIT 50000", (domain,))
+                cursor = db.execute("SELECT data FROM pairs WHERE split='train' AND domain=? LIMIT 8000", (domain,))
                 for (line,) in cursor:
                     record = json.loads(line)
                     yield record["en"]["text"]

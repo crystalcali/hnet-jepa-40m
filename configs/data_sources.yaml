@@ -1,46 +1,72 @@
-# Only enable a source after reviewing its pinned revision, provenance, terms,
-# pairing schema and independent benchmark contamination coverage.
-sources: []
-# Source record format:
-# - name: audited_local_export
-#   path: /absolute/path/parallel_pairs.jsonl
-#   license: accepted source terms
-#   license_reviewed: true
-#   pairing_reviewed: true
-#   revision: sha256 of the original local JSONL file
-#   domain: simple  # or omit when present per row
-#
-# Remote source:
-# - name: review_first
-#   dataset: owner/dataset
-#   revision: exact Hugging Face commit SHA
-#   split: train
-#   config: optional_config
-#   en_field: translation.en
-#   ru_field: translation.ru
-#   group_field: source_document_id
-#   domain: simple
-#   license: accepted source terms
-#   license_reviewed: true
-#   pairing_reviewed: true
-#   sentence_aligned: true
-#
-# With the standardized local schema, each language is a mapping with text and
-# optional question, steps, answer, blocks, or step_byte_spans. Alignment is a
-# list of objects with en_span, ru_span, and verified=true; offsets are UTF-8 bytes.
-benchmark_holdout: null
-# Benchmark holdout: JSONL using the standardized bilingual schema, or language
-# strings. Include test prompts and their known variants in both languages.
+sources:
+  - name: published_bilingual_story_adaptations
+    dataset: limloop/ru_en_story_pairs
+    revision: 95a277810fb0034e1d25a2c1257be21659626316
+    files: [data/stories-00000.parquet, data/stories-00001.parquet]
+    scan_rows_per_shard: 22000
+    pilot_adapter: stories
+    split: train
+    domain: simple
+    license: MIT (as declared by publisher)
+    license_reviewed: true
+    pairing_reviewed: true
+  - name: fine_translations_edu_russian
+    dataset: HuggingFaceFW/finetranslations-edu
+    revision: 93f3d2c7b74d7a0a98802f298c63f3d63282a7df
+    files: [data/000_00000.parquet]
+    scan_rows_per_shard: 20000
+    pilot_adapter: education
+    split: train
+    domain: education
+    license: ODC-BY (database, original documents retain their own terms)
+    license_reviewed: true
+    pairing_reviewed: true
+  - name: published_openmath_ru_en
+    dataset: mizinovmv/ru_OpenMathInstruct-2
+    revision: b677d04409398a22480fce3b58eb9df2807fe86f
+    files: [data/train-00000-of-00001.parquet]
+    scan_rows_per_shard: 22000
+    pilot_adapter: math
+    split: train
+    domain: math
+    license: CC-BY-4.0 (as declared by publisher)
+    license_reviewed: true
+    pairing_reviewed: true
+  - name: translated_python_prompts
+    dataset: mizinovmv/ru_codefeedback
+    revision: 6726ba21e0355285a38cd07528e865f7644f0aa5
+    files: [data/train-00000-of-00002.parquet, data/train-00001-of-00002.parquet]
+    pilot_adapter: python
+    split: train
+    domain: python
+    license: Apache-2.0 (as declared by publisher)
+    license_reviewed: true
+    pairing_reviewed: true
+  - name: parallel_logic_and_planning
+    dataset: hivaze/LOGIC-701
+    revision: 772fb29780b3184b10a11cc2f0238af2cf7326aa
+    files: [en/train-00000-of-00001.parquet, ru/train-00000-of-00001.parquet]
+    pilot_adapter: logic701
+    split: train
+    license: Apache-2.0 (as declared by publisher)
+    license_reviewed: true
+    pairing_reviewed: true
 
-# Candidate catalog for review before enabling.
-# General: KvaytG/en-ru-parallel-20m, OPUS Books / OpenSubtitles / Tatoeba,
-# limloop/ru_en_story_pairs.
-# Education: HuggingFaceFW/finetranslations-edu, HuggingFaceFW/finetranslations.
-# Maths: mizinovmv/ru_OpenMathInstruct-2, d0rj/mathematics_dataset.
-# Logic: limloop/logic_duo.
-# Python: mizinovmv/ru_codefeedback, sup2ch/ru-en-code-curriculum.
-# Check the actual source license, original training split, pair verification,
-# benchmark overlap and nested fields. The listed IDs are candidates only.
+heldout_sources:
+  - dataset: openai/gsm8k
+    revision: 740312add88f781978c0658806c59bc2815b9866
+    file: main/test-00000-of-00001.parquet
+    language: en
+  - dataset: juletxara/mgsm
+    revision: b2f13d426afe3be8d69a7e739b36724db8b66bbc
+    file: en/test-00000-of-00001.parquet
+    language: en
+  - dataset: juletxara/mgsm
+    revision: b2f13d426afe3be8d69a7e739b36724db8b66bbc
+    file: ru/test-00000-of-00001.parquet
+    language: ru
+
+# Track exact GSM8K/MGSM checks separately from full holdout auditing.
 quality_reviewed: false
 near_dedup_reviewed: false
 benchmark_reviewed: false

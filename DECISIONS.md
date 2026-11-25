@@ -12,8 +12,10 @@
 - Corpus ingestion accepts pinned JSONL/Hugging Face field mappings. Exact
   per-side deduplication and overlap are automated. Near duplicates, semantic
   alignment and benchmark variants still require a reviewed upstream audit.
-  The supplied catalog starts with no source enabled. It makes no licensing,
-  quota or quality assertion.
+  The default catalog pins the five published pilot sources. The measured
+  cache includes exact duplicate checks and GSM8K/MGSM exact overlap checks.
+  Only the published CodeFeedback prompt pairs are used. Logic-701 contributes
+  labeled examples and must be excluded from independent evaluation.
 - The runnable evaluator covers held-out BPB, basic retrieval/rank and the
   paired bilingual reasoning generator, and reads pinned normalized benchmark
   exports for continuation ranking, exact match, chrF++ and BLEU. Dataset-specific

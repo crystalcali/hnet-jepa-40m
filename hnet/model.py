@@ -9,8 +9,7 @@ from torch.utils.checkpoint import checkpoint
 
 from .mamba import MambaBlock
 
-PAD, BOS, EOS, MASK, SEP, EN, RU, TASK = range(256, 264)
-CONTROL = {"en": EN, "ru": RU}
+from .corpus import BOS, CONTROL, EN, EOS, MASK, PAD, RU, SEP, TASK
 
 
 def gather(x, index):

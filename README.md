@@ -93,25 +93,36 @@ python3 train.py --config configs/debug.yaml --data cache/debug-fixture --run ru
 ```
 
 
-Заполни `configs/data_sources.yaml` готовыми RU–EN парами с проверенными
-лицензиями, схемой выравнивания и зафиксированными ревизиями. Для benchmark
-holdout нужен отдельный двуязычный список. Результат аудита и дефициты по
-категориям записываются в `audit.json` и `deficits.json`. Поля
-`quality_reviewed`, `near_dedup_reviewed` и `benchmark_reviewed` подтверждают
-реально выполненные проверки по источникам. Шаблон поставляется пустым.
+### Реальный двуязычный корпус
+
+Конфигурация [configs/data_sources.yaml](configs/data_sources.yaml) содержит
+закреплённые ревизии опубликованных источников и их адаптеры. Если уже есть
+подготовленный архив корпуса, распакуй его в `cache/`. Сборка с нуля идёт
+на CPU и может скачать около 2–3 ГБ исходных файлов:
 
 ```bash
-python3 -m data.audit --config configs/data_sources.yaml --target-bpe 30000000 --out cache/pilot
+python3 -m data.build_pilot --out cache/pilot
 python3 -m data.pack --manifest cache/pilot/manifest.jsonl --out cache/pilot
-python3 train.py --config configs/pilot.yaml --data cache/pilot --run runs/c-smoke --dry-run
-python3 benchmark.py --config configs/pilot.yaml --data cache/pilot --steps 10 --full-objectives
 ```
 
-`--dry-run` выполняет один forward/backward без шага оптимизатора. Benchmark
-печатает измеренные исходные байт/с, пиковую память, K и покрытие каждого
-objective. Проверь, что есть пригодные примеры для Dynamics, Task CE и Local JEPA.
-Аудит малого корпуса можно использовать для диагностики с `--debug-corpus`,
-но такие прогоны не входят в сравнение моделей.
+Проверь `audit.json` и `deficits.json`. В текущем корпусе точный поиск дублей
+и проверка совпадений с GSM8K/MGSM выполнены. Расширенная проверка
+контаминации и близких дублей открыта. Logic-701 используется как источник
+размеченных данных и исключён из независимой оценки. Python-набор содержит
+пары заданий. Парных решений в этом источнике нет.
+
+Диагностика на реальном корпусе с недостающими квотами запускается явно:
+
+```bash
+python3 train.py --config configs/pilot.yaml --data cache/pilot --run runs/real_debug \
+  --debug-corpus --max-steps 10
+```
+
+Для оценки памяти и скорости после проверки CUDA:
+
+```bash
+python3 benchmark.py --config configs/pilot.yaml --data cache/pilot --steps 10 --full-objectives
+```
 
 ## 3. Обучение и онлайн-метрики
 
