@@ -1,0 +1,10 @@
+model: C
+ff: 1536
+widths: [128, 256, 384, 512]
+depths: [6, 4, 4]
+blocks: 8
+ratio_goal: 36
+iteration_scale: 0.1
+micro_pairs: 2
+grad_accum: 8
+sigreg_min: 256

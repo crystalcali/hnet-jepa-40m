@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>H-Net-JEPA — обучение</title>
+<style>
+:root{color-scheme:dark;--bg:#101318;--card:#171b22;--line:#2a303b;--muted:#aab6c8;--ink:#eef3f9;--aqua:#69e3bc;--blue:#84aaff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px system-ui,sans-serif}.wrap{max-width:1400px;margin:auto;padding:34px 32px 50px}
+header{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;border-bottom:1px solid var(--line);padding-bottom:23px}
+h1{font-size:31px;letter-spacing:-.045em;margin:0 0 8px}h2{font-size:15px;margin:0 0 14px;font-weight:650}
+muted,.muted,small{color:var(--muted)}label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}select{min-width:190px;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:9px}
+.stats,.plots{display:grid;gap:12px;margin-top:16px}.stats{grid-template-columns:repeat(6,1fr)}.plots{grid-template-columns:repeat(2,minmax(0,1fr))}
+section,.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:17px}.stat b{display:block;font:700 24px ui-monospace,monospace;margin:8px 0 0;color:var(--aqua)}.stat span{color:var(--muted)}
+canvas{display:block;width:100%;height:205px}.details{margin-top:12px;overflow:auto}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:8px 12px 8px 0;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:500}td.num{font-family:ui-monospace,monospace}.legend{display:flex;gap:14px;color:var(--muted);flex-wrap:wrap;margin-top:6px}.legend i{display:inline-block;width:8px;height:8px;margin-right:5px;border-radius:50%}
+[hidden]{display:none!important}#message{margin-top:20px;color:var(--muted);white-space:pre-wrap}#status[data-error=true]{color:#ffb08b}
+@media(max-width:850px){.stats{grid-template-columns:repeat(3,1fr)}}@media(max-width:580px){.wrap{padding:20px 15px}.stats,.plots{grid-template-columns:repeat(2,minmax(0,1fr))}.plots{grid-template-columns:1fr}header{flex-wrap:wrap}h1{font-size:26px}}
+</style>
+</head>
+<body><main class="wrap"><header>
+<div><h1>H-Net-JEPA</h1><div id="status" class="muted" role="status">Подключение к журналу обучения</div></div>
+<div><label for="run">Эксперимент</label><select id="run"></select></div>
+</header><p id="message" role="status"></p><div id="body" hidden>
+<div class="stats" id="stats"></div><div class="plots" id="plots"></div>
+<section class="details"><h2>Функции потерь на последнем шаге</h2><table>
+<thead><tr><th>Компонент</th><th>Значение</th><th>С весом</th><th>Покрытие</th></tr></thead><tbody id="losses"></tbody></table></section>
+<section class="details"><h2>Покрытие обучающей выборки</h2><table>
+<thead><tr><th>Категория</th><th>Обработано, BPE-экв.</th><th>Повторные проходы</th></tr></thead><tbody id="domains"></tbody></table></section>
+</div></main>
+<script>
+"use strict";
+const byId = id => document.getElementById(id);
+const fmt = (value,digits=2) => Number.isFinite(value) ? value.toLocaleString("ru",{maximumFractionDigits:digits}) : "—";
+const colors = ["#69e3bc","#84aaff","#f0b782","#d4a3fb"];
+const cards = [
+  ["Шаг",r=>r.step,0],["Loss",r=>r.loss,4],["Базовые BPE-экв.",r=>r.bpe,0],
+  ["Рекурренции K",r=>r.K,0],["Байт/с",r=>r.source_bytes_per_s,1],["GPU, ГиБ",r=>r.gpu_gib,2]
+];
+const plots = [
+  ["Loss", [["Суммарный",r=>r.loss],["Byte CE",r=>r.raw?.byte]]],
+  ["Валидация, бит/байт", [["RU",r=>r.bpb?.ru],["EN",r=>r.bpb?.en]],true],
+  ["Фактическое сжатие", [["L0 → L3",r=>r.compression],["L1",r=>r.hard_ratios?.[0]],["L2",r=>r.hard_ratios?.[1]],["L3",r=>r.hard_ratios?.[2]]]],
+  ["Производительность, байт/с", [["Подача корпуса",r=>r.source_bytes_per_s]]],
+  ["Градиент и память", [["Норма градиента",r=>r.grad_norm],["ГиБ",r=>r.gpu_gib]]],
+  ["Число итераций K", [["K",r=>r.K]]]
+];
+function elt(tag,text) {
+  const el = document.createElement(tag);
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+const values = cards.map(([name]) => {
+  const card = elt("div"); card.className="stat"; card.append(elt("span",name));
+  const value = elt("b","—"); card.append(value); byId("stats").append(card); return value;
+});
+const charts = plots.map(([title,lines])=>{
+  const Box=elt("section"); Box.append(elt("h2",title));
+  const canvas=elt("canvas"); canvas.setAttribute("aria-label",title); canvas.setAttribute("role","img"); Box.append(canvas);
+  const legend=elt("div"); legend.className="legend";
+  lines.forEach(([key],i)=>{
+    const item=elt("span"), swatch=elt("i");
+    swatch.style.backgroundColor=colors[i]; item.append(swatch,document.createTextNode(key)); legend.append(item);
+  });
+  Box.append(legend); byId("plots").append(Box);
+  return canvas;
+});
+function draw(canvas,rows,lines){
+  const width=canvas.clientWidth, height=canvas.clientHeight, scale=devicePixelRatio||1;
+  if (!width) return;
+  canvas.width=width*scale; canvas.height=height*scale;
+  const ctx=canvas.getContext("2d"); ctx.scale(scale,scale); ctx.font="11px system-ui";
+  const series=lines.map(([,get])=>rows.map(r=>[r.step,get(r)]).filter(([x,y])=>Number.isFinite(x)&&Number.isFinite(y)));
+  const points=series.flat();
+  ctx.fillStyle="#aab6c8";
+  if (!points.length){ctx.fillText("Ожидание измерений",8,25);return;}
+  const x0=Math.min(...points.map(p=>p[0])), x1=Math.max(...points.map(p=>p[0]));
+  let y0=Math.min(...points.map(p=>p[1])), y1=Math.max(...points.map(p=>p[1]));
+  if (y0===y1){const margin=Math.max(Math.abs(y0)*.15,.02);y0-=margin;y1+=margin;}
+  const left=49,right=width-12,top=11,bottom=height-27;
+  const px=x=>x0===x1?(left+right)/2:left+(right-left)*(x-x0)/(x1-x0);
+  const py=y=>bottom-(bottom-top)*(y-y0)/(y1-y0);
+  for(let i=0;i<5;i++){
+    const y=y0+(y1-y0)*i/4;
+    ctx.strokeStyle="#2a303b";ctx.beginPath();ctx.moveTo(left,py(y));ctx.lineTo(right,py(y));ctx.stroke();
+    ctx.fillText(fmt(y,2),1,py(y)+4);
+  }
+  ctx.fillText(fmt(x0,0),left,bottom+18);
+  if(x1!==x0){const label=fmt(x1,0);ctx.fillText(label,right-ctx.measureText(label).width,bottom+18);}
+  series.forEach((points,index)=>{
+    if(!points.length)return;
+    ctx.fillStyle=ctx.strokeStyle=colors[index];ctx.lineWidth=1.7;ctx.beginPath();
+    points.forEach(([x,y],i)=>i?ctx.lineTo(px(x),py(y)):ctx.moveTo(px(x),py(y)));ctx.stroke();
+    if(points.length<40)points.forEach(([x,y])=>{ctx.beginPath();ctx.arc(px(x),py(y),2.5,0,Math.PI*2);ctx.fill();});
+  });
+}
+function table(id, rows){
+  const body=byId(id); body.replaceChildren();
+  for(const row of rows){const tr=elt("tr");row.forEach((value,index)=>{const td=elt("td",value);if(index)td.className="num";tr.append(td);}); body.append(tr);}
+}
+const statuses={running:"Обучение",interrupted:"Прервано",stopped_at_limit:"Остановлено по лимиту",error:"Ошибка"};
+let lastData=null;
+function render(data){
+  const status=data.events.findLast(r=>r.kind==="status");
+  const trains=data.events.filter(r=>r.kind==="train");
+  const latest=trains.at(-1)||{};
+  const valid=data.events.filter(r=>r.kind==="validation");
+  const state=statuses[status?.status]||"Есть файл метрик";
+  const age=Math.max(0,Math.round(Date.now()/1000-data.last_modified));
+  byId("status").textContent=state+" · обновление "+fmt(age,0)+" с назад";
+  byId("status").dataset.error=String(status?.status==="error");
+  byId("message").textContent=status?.error||(!trains.length?"Первый шаг ещё не записан.":"");
+  byId("body").hidden=false;
+  cards.forEach(([,get,digits],i)=>values[i].textContent=fmt(get(latest),digits));
+  const unique=rows=>[...new Map(rows.map(r=>[r.step,r])).values()].sort((a,b)=>a.step-b.step);
+  plots.forEach(([,lines,isVal],i)=>draw(charts[i],unique(isVal?valid:trains),lines));
+  table("losses",Object.keys(latest.raw||{}).map(k=>[k,fmt(latest.raw[k],5),fmt(latest.weighted?.[k],5),fmt(latest.coverage?.[k],0)]));
+  table("domains",Object.keys(latest.domain_bpe||{}).map(k=>[k,fmt(latest.domain_bpe[k],0),fmt(latest.domain_reshuffles?.[k],0)]));
+}
+async function refresh(){
+  try{
+    const list=await fetch("/api/runs",{cache:"no-store"}); if(!list.ok)throw Error("Журнал недоступен");
+    const names=await list.json(),select=byId("run"),current=select.value;
+    if(JSON.stringify([...select.options].map(o=>o.value))!==JSON.stringify(names)){
+      select.replaceChildren(...names.map(name=>new Option(name,name)));
+      if(names.includes(current))select.value=current;
+    }
+    if(!names.length){byId("body").hidden=true;byId("message").textContent="Запуски появятся после старта обучения.";return;}
+    const response=await fetch("/api/runs/"+encodeURIComponent(select.value),{cache:"no-store"});
+    if(!response.ok)throw Error("Не удалось прочитать метрики");
+    lastData=await response.json(); render(lastData);
+  }catch(error){byId("message").textContent=String(error.message);byId("status").textContent="Нет связи с журналом";}
+}
+byId("run").addEventListener("change",refresh);
+window.addEventListener("resize",()=>{if(lastData)render(lastData);});
+async function poll(){await refresh();setTimeout(poll,2000);}
+poll();
+</script></body></html>

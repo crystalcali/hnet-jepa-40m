@@ -1,1 +1,128 @@
-# hnet-jepa-40m
+# H-Net-JEPA-40M
+
+Байтовая H-Net с тремя уровнями сжатия, рекуррентным ядром и JEPA. Целевая
+машина — NVIDIA DGX Spark. [ТЗ](SPEC.md) · [План](PLAN.md) · [Решения и статус](DECISIONS.md)
+
+## 1. Установка и smoke-test на Spark
+
+Используй рабочий Python с установленным CUDA PyTorch под Spark. Для
+изолированного окружения на хосте создай venv с доступом к этому PyTorch
+или используй уже настроенный NVIDIA-контейнер с GPU. Для SSH-туннеля панель
+должна быть доступна на loopback Spark. В контейнере для этого подойдёт
+существующий запуск с host network.
+
+```bash
+git clone https://github.com/crystalcali/hnet-jepa-40m.git
+cd hnet-jepa-40m
+python -m pip install -r requirements-data.txt
+python -m scripts.check_env
+```
+
+Если Spark по-прежнему не видит GitHub, клонируй на доступной машине, создай
+bundle и перенеси его по уже настроенному SSH (используй свой SSH-адрес).
+
+```bash
+git clone https://github.com/crystalcali/hnet-jepa-40m.git
+git -C hnet-jepa-40m bundle create hnet-jepa-40m.bundle --all
+scp hnet-jepa-40m.bundle user@SPARK_HOST:~/
+ssh user@SPARK_HOST
+git clone ~/hnet-jepa-40m.bundle hnet-jepa-40m
+cd hnet-jepa-40m
+python -m pip install -r requirements-data.txt
+```
+
+При отсутствии рабочих `causal-conv1d` и `mamba-ssm` в окружении потребуется
+совместимая сборка. В уже работающей CUDA-среде с `nvcc` и компилятором:
+
+```bash
+python -m pip install ninja packaging wheel setuptools
+python -m pip install --no-build-isolation causal-conv1d
+python -m pip install --no-build-isolation mamba-ssm
+python -m scripts.check_env --cuda-smoke
+python -m scripts.count_params --config configs/hnet_jepa_40m.yaml
+python -m pytest -q
+```
+
+Перед пилотом smoke-test должен успешно проверить реальный CUDA forward/backward,
+BF16 и сопоставимость Mamba-2 с CPU. Зависимости CUDA собираются под установленный
+PyTorch. Успешно проверенные версии сохрани как локальный lock-файл через
+`python -m pip freeze > requirements.spark.lock`. Если Spark работает
+без доступа к индексам пакетов, установи подготовленные для этой среды wheel
+через `pip --no-index --find-links`.
+
+## 2. Корпус и короткая проверка
+
+Заполни `configs/data_sources.yaml` готовыми RU–EN парами с проверенными
+лицензиями, схемой выравнивания и зафиксированными ревизиями. Для benchmark
+holdout нужен отдельный двуязычный список. Результат аудита и дефициты по
+категориям записываются в `audit.json` и `deficits.json`. Поля
+`quality_reviewed`, `near_dedup_reviewed` и `benchmark_reviewed` подтверждают
+реально выполненные проверки по источникам. Шаблон поставляется пустым.
+
+```bash
+python -m data.audit --config configs/data_sources.yaml --target-bpe 30000000 --out cache/pilot
+python -m data.pack --manifest cache/pilot/manifest.jsonl --out cache/pilot
+python train.py --config configs/pilot.yaml --data cache/pilot --run runs/c-smoke --dry-run
+python benchmark.py --config configs/pilot.yaml --data cache/pilot --steps 10 --full-objectives
+```
+
+`--dry-run` выполняет один forward/backward без шага оптимизатора. Benchmark
+печатает измеренные исходные байт/с, пиковую память, K и покрытие каждого
+objective. Проверь, что есть пригодные примеры для Dynamics, Task CE и Local JEPA.
+Аудит малого корпуса можно использовать для диагностики с `--debug-corpus`,
+но такие прогоны не входят в сравнение моделей.
+
+## 3. Обучение и онлайн-метрики
+
+На Spark запусти панель в отдельной сессии:
+
+```bash
+tmux new -s hnet-metrics
+python -m dashboard.server --runs runs --port 7860
+```
+
+На своём компьютере открой туннель:
+
+```bash
+ssh -N -L 7860:127.0.0.1:7860 user@SPARK_HOST
+```
+
+Открой [http://localhost:7860](http://localhost:7860). Панель опрашивает журнал
+раз в две секунды. Показывает loss и его компоненты, BPB на валидации,
+фактическое сжатие, K, норму градиента, байт/с и память. Не использует GPU.
+Сырые события доступны в `runs/<имя>/metrics.jsonl`.
+
+В отдельной сессии Spark:
+
+```bash
+tmux new -s hnet-pilot
+python train.py --config configs/pilot.yaml --data cache/pilot --run runs/pilot_c --max-hours 6
+```
+
+`Ctrl-b`, затем `d` отсоединяет терминал, `tmux attach -t hnet-pilot` возвращает.
+`Ctrl-c` просит сохранить чекпоинт после завершения текущего шага. Для
+возобновления используй ту же конфигурацию, корпус, seed и горизонт экспозиции:
+
+```bash
+python train.py --config configs/pilot.yaml --data cache/pilot --run runs/pilot_c --resume latest --max-hours 6
+```
+
+`--max-hours` задаёт суммарный лимит времени запуска с учётом resume.
+Для A и B используй `configs/transformer_40m.yaml` и `configs/hnet_40m.yaml`
+с отдельными директориями запусков. Для сравнения сохрани одинаковые
+корпус, seed и `--schedule-bpe` (по умолчанию 30M для пилота).
+Для полного корпуса при аудите используй `--target-bpe 1000000000
+--tokenizer cache/pilot/tokenizer.json`. Полный запуск требует `--full`,
+корпус с пройденным аудитом и отдельную команду, максимум 72 ч на модель.
+
+## 4. Генерация и оценка
+
+```bash
+python generate.py --checkpoint runs/pilot_c/latest --mode task --iterations 8 --language ru --prompt 'Сколько будет (7+3)*5?'
+python evaluate.py --checkpoint runs/pilot_c/latest --data cache/pilot --split test --out runs/pilot_c/eval.json
+python evaluate.py --checkpoint runs/pilot_c/latest --data cache/pilot --split test --reasoning-per-level 200 --iterations 1,2,4,8,16,32
+```
+
+В параллельном train лучше не запускать генерацию на том же GPU.
+Для проверки на CPU можно добавить `--device cpu`, короткий контекст и
+небольшое число примеров. K=16 и 32 — экстраполяция глубины.

@@ -1,0 +1,8 @@
+# Install the Spark-compatible PyTorch first. CUDA Mamba packages are separate.
+numpy>=1.26,<3
+PyYAML>=6,<7
+tokenizers>=0.20,<1
+safetensors>=0.4,<1
+fastapi>=0.115,<1
+uvicorn>=0.32,<1
+pytest>=8,<10
