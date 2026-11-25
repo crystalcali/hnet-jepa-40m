@@ -3,25 +3,34 @@
 Байтовая H-Net с тремя уровнями сжатия, рекуррентным ядром и JEPA. Целевая
 машина — NVIDIA DGX Spark. [ТЗ](SPEC.md) · [План](PLAN.md) · [Решения и статус](DECISIONS.md)
 
-## 1. Установка и smoke-test на Spark
+## 1. Окружение и CUDA smoke-test на Spark
 
-На хосте начни с `python3`. Проверь, что этот интерпретатор видит CUDA PyTorch.
-Если импорт `torch` не проходит или CUDA недоступна, активируй уже настроенное
-CUDA-окружение на Spark либо зайди в NVIDIA-контейнер с доступом к GPU и
-повтори проверку там. В командах используй интерпретатор этого окружения.
-Для SSH-туннеля панель должна быть доступна на loopback Spark. В контейнере
-для этого подойдёт существующий запуск с host network.
+Для Spark используй Docker с NVIDIA GPU runtime. Базовый образ
+`nvcr.io/nvidia/pytorch:25.11-py3` содержит CUDA PyTorch и CUDA Toolkit.
+При первой сборке установщик добавляет зависимости проекта в образ и собирает
+закреплённые версии Mamba-2 и causal-conv1d под этот PyTorch. Системный Python
+Spark не участвует. Нужен доступ к NGC и PyPI для первой сборки.
 
 ```bash
 git clone https://github.com/crystalcali/hnet-jepa-40m.git
 cd hnet-jepa-40m
-python3 -c 'import torch; print(torch.__version__, torch.version.cuda); assert torch.cuda.is_available(), "CUDA unavailable"'
-python3 -m pip install -r requirements-data.txt
-python3 -m scripts.check_env
+bash scripts/spark.sh smoke
 ```
 
-Если Spark по-прежнему не видит GitHub, клонируй на доступной машине, создай
-bundle и перенеси его по уже настроенному SSH (используй свой SSH-адрес).
+Из уже клонированного репозитория сначала выполни `git pull --ff-only`.
+Команда `smoke` собирает образ при первом запуске и запускает CUDA-проверку.
+Она проверяет прямой и обратный проход, BF16 и сопоставимость Mamba-2 с CPU.
+Для пересборки образа есть `bash scripts/spark.sh build`.
+
+Для команд следующих разделов на Spark открой оболочку контейнера.
+Исходники, `cache/`, `runs/` и чекпоинты остаются в каталоге на хосте.
+
+```bash
+bash scripts/spark.sh shell
+```
+
+Если Spark не видит GitHub, клонируй на другой машине и перенеси Git bundle
+по SSH. Команды ниже используют твой SSH-адрес вместо `user@SPARK_HOST`.
 
 ```bash
 git clone https://github.com/crystalcali/hnet-jepa-40m.git
@@ -30,27 +39,13 @@ scp hnet-jepa-40m.bundle user@SPARK_HOST:~/
 ssh user@SPARK_HOST
 git clone ~/hnet-jepa-40m.bundle hnet-jepa-40m
 cd hnet-jepa-40m
-python3 -m pip install -r requirements-data.txt
+bash scripts/spark.sh smoke
 ```
 
-При отсутствии рабочих `causal-conv1d` и `mamba-ssm` в окружении потребуется
-совместимая сборка. В уже работающей CUDA-среде с `nvcc` и компилятором:
-
-```bash
-python3 -m pip install ninja packaging wheel setuptools
-python3 -m pip install --no-build-isolation causal-conv1d
-python3 -m pip install --no-build-isolation mamba-ssm
-python3 -m scripts.check_env --cuda-smoke
-python3 -m scripts.count_params --config configs/hnet_jepa_40m.yaml
-python3 -m pytest -q
-```
-
-Перед пилотом smoke-test должен успешно проверить реальный CUDA forward/backward,
-BF16 и сопоставимость Mamba-2 с CPU. Зависимости CUDA собираются под установленный
-PyTorch. Успешно проверенные версии сохрани как локальный lock-файл через
-`python3 -m pip freeze > requirements.spark.lock`. Если Spark работает
-без доступа к индексам пакетов, установи подготовленные для этой среды wheel
-через `pip --no-index --find-links`.
+При работе в собственном CUDA-окружении выполни `python3 -m pip install -r
+requirements-data.txt` и `python3 -m scripts.check_env --cuda-smoke` внутри
+этого окружения. Проверенные версии можно сохранить командой
+`python3 -m pip freeze > requirements.spark.lock`.
 
 ## 2. Корпус и короткая проверка
 
@@ -86,11 +81,11 @@ objective. Проверь, что есть пригодные примеры д�
 
 ## 3. Обучение и онлайн-метрики
 
-На Spark запусти панель в отдельной сессии:
+На хосте Spark запусти панель в отдельной сессии:
 
 ```bash
 tmux new -s hnet-metrics
-python3 -m dashboard.server --runs runs --port 7860
+bash scripts/spark.sh dashboard --port 7860
 ```
 
 На своём компьютере открой туннель:
@@ -106,11 +101,11 @@ ssh -N -L 7860:127.0.0.1:7860 user@SPARK_HOST
 пишутся нормы и попарные косинусы градиентов, а также снимок латентов и
 границ на фиксированной пробе. Интервал меняется через `--probe-every`.
 
-В отдельной сессии Spark:
+В отдельной сессии Spark запусти обучение через контейнер:
 
 ```bash
 tmux new -s hnet-pilot
-python3 train.py --config configs/pilot.yaml --data cache/pilot --run runs/pilot_c --max-hours 6
+bash scripts/spark.sh run python3 train.py --config configs/pilot.yaml --data cache/pilot --run runs/pilot_c --max-hours 6
 ```
 
 `Ctrl-b`, затем `d` отсоединяет терминал, `tmux attach -t hnet-pilot` возвращает.
