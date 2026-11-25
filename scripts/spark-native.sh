@@ -10,6 +10,7 @@ torch_version='2.9.1+cu130'
 usage() {
     cat <<'HELP'
 bash scripts/spark-native.sh smoke                  Install and verify CUDA PyTorch and Mamba-2
+bash scripts/spark-native.sh smoke-fast             Build Mamba for GB10 only, then run the smoke-test
 bash scripts/spark-native.sh dashboard [--port N]   Serve live metrics on the Spark loopback interface
 bash scripts/spark-native.sh run COMMAND [ARGS...]  Run with the project environment active
 HELP
@@ -58,8 +59,16 @@ setup() {
     "$py" -m pip install --index-url https://download.pytorch.org/whl/cu130 "torch==$torch_version"
     "$py" -c 'import torch; print("PyTorch", torch.__version__, "GPU", torch.cuda.get_device_name(0)); assert torch.cuda.is_bf16_supported()'
     "$py" -m pip install -r requirements-data.txt -r requirements-spark-build.txt
-    MAX_JOBS="${MAX_JOBS:-4}" CAUSAL_CONV1D_FORCE_BUILD=TRUE MAMBA_FORCE_BUILD=TRUE \
-        "$py" -m pip install --no-build-isolation --no-deps -r requirements-spark-cuda.txt
+    if [[ "$1" == smoke-fast ]]; then
+        local causal_requirement
+        causal_requirement="$(grep -m 1 '^causal-conv1d==' requirements-spark-cuda.txt)"
+        MAX_JOBS="${MAX_JOBS:-4}" CAUSAL_CONV1D_FORCE_BUILD=TRUE \
+            "$py" -m pip install --no-build-isolation --no-deps "$causal_requirement"
+        MAX_JOBS="${MAX_JOBS:-4}" "$py" -m scripts.build_mamba_spark
+    else
+        MAX_JOBS="${MAX_JOBS:-4}" CAUSAL_CONV1D_FORCE_BUILD=TRUE MAMBA_FORCE_BUILD=TRUE \
+            "$py" -m pip install --no-build-isolation --no-deps -r requirements-spark-cuda.txt
+    fi
 }
 
 action="${1:-help}"
@@ -68,8 +77,8 @@ if [[ $# -gt 0 ]]; then
 fi
 
 case "$action" in
-    smoke)
-        setup
+    smoke|smoke-fast)
+        setup "$action"
         exec "$py" -m scripts.check_env --cuda-smoke "$@"
         ;;
     dashboard)
