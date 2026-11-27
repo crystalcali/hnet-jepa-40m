@@ -1,0 +1,12 @@
+# One common Transformer core. Outer blocks and vocabulary trade parameter budgets.
+width: 512
+blocks: 10
+ff: 1536
+outer_width: 384
+outer_depth: 4
+bpe_vocab: 8192
+context_bytes: 2048
+batch_size: 8
+lr: 0.0003
+min_lr: 0.00003
+ratio_weight: 0.10

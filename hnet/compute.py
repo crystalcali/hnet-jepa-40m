@@ -49,8 +49,10 @@ class ComputeEstimate:
                 hook = self._ssm
             if hook:
                 self.hooks.append(module.register_forward_pre_hook(hook))
-        norm = self.model.out_norm if hasattr(self.model, "out_norm") else self.model.norm
-        self.hooks.append(norm.register_forward_pre_hook(self._head))
+        # A real nn.Linear head is already counted by the linear hook.
+        if not isinstance(getattr(self.model, "head", None), nn.Linear):
+            norm = self.model.out_norm if hasattr(self.model, "out_norm") else self.model.norm
+            self.hooks.append(norm.register_forward_pre_hook(self._head))
         return self
 
     def __exit__(self, *_):
