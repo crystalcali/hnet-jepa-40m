@@ -1,5 +1,6 @@
 """Matched BPE Transformer and single-stage byte H-Net."""
 from dataclasses import dataclass
+import math
 
 import torch
 import torch.nn.functional as F
@@ -9,9 +10,30 @@ from .model import Route, Router, TransformerBlock, dechunk, gather, mamba_stack
 
 
 @dataclass
+class FixedRoute:
+    valid: torch.Tensor
+    boundaries: torch.Tensor
+    index: torch.Tensor
+    parents: torch.Tensor
+
+
+def fixed_route(valid, ratio):
+    # Each boundary is a chunk start, as with the public dynamic router.
+    # ceil(j * ratio) gives alternating integer spans for fractional ratios.
+    batch, length = valid.shape
+    chunks = math.floor((length - 1) / ratio) + 1
+    positions = torch.arange(length, device=valid.device)
+    starts = (torch.arange(chunks, device=valid.device, dtype=torch.float64) * ratio).ceil().long()
+    parents = torch.searchsorted(starts, positions, right=True) - 1
+    boundaries = torch.zeros(length, dtype=torch.bool, device=valid.device)
+    boundaries[starts] = True
+    return FixedRoute(valid, boundaries & valid, starts.expand(batch, -1), parents.expand(batch, -1))
+
+
+@dataclass
 class Prediction:
     logits: torch.Tensor
-    route: Route | None = None
+    route: Route | FixedRoute | None = None
 
 
 def core(config):
@@ -48,13 +70,17 @@ class PretrainBPE(nn.Module):
 
 
 class PretrainHNet(nn.Module):
-    def __init__(self, config, backend):
+    def __init__(self, config, backend, fixed_ratio=None):
         super().__init__()
         width, depth = config["outer_width"], config["outer_depth"]
         self.embed = nn.Embedding(259, width)
         self.encoder = mamba_stack(width, depth, backend)
         self.encoder_norm = nn.RMSNorm(width, eps=1e-5)
-        self.router = Router(width)
+        # Preserve the shared modules' initialization for the same seed.
+        # Only the dynamic model registers the router as a parameterized module.
+        router = Router(width)
+        self.router = router if fixed_ratio is None else None
+        self.fixed_ratio = fixed_ratio
         self.up = nn.Linear(width, config["width"], bias=False)
         self.blocks = core(config)
         self.core_norm = nn.RMSNorm(config["width"], eps=1e-5)
@@ -70,13 +96,20 @@ class PretrainHNet(nn.Module):
 
     def forward(self, ids, valid):
         h = self.encode(ids)
-        route = self.router(h, valid, torch.zeros_like(valid))
+        if self.router is None:
+            route = fixed_route(valid, self.fixed_ratio)
+        else:
+            route = self.router(h, valid, torch.zeros_like(valid))
         z = self.up(gather(h, route.index))
         c = self.down(self.core_norm(self.blocks(z)))
-        expanded = dechunk(c, route)
-        confidence = route.assignment
-        gate = (1 + (confidence - confidence.detach())).to(expanded.dtype)
-        decoded = self.decoder(h + expanded * gate[..., None])
+        if self.router is None:
+            residual = gather(c, route.parents)
+        else:
+            expanded = dechunk(c, route)
+            confidence = route.assignment
+            gate = (1 + (confidence - confidence.detach())).to(expanded.dtype)
+            residual = expanded * gate[..., None]
+        decoded = self.decoder(h + residual)
         logits = F.linear(self.out_norm(decoded), self.embed.weight)
         return Prediction(logits.masked_fill(self.forbidden, -torch.inf), route)
 
@@ -92,7 +125,10 @@ def ratio_loss(route, target):
 def build_pretrain_model(kind, config, vocab, device):
     if kind == "bpe":
         return PretrainBPE(config, vocab).to(device)
-    if kind == "hnet":
+    if kind in ("hnet", "hnet-fixed"):
         backend = "cuda" if device.type == "cuda" else "reference"
-        return PretrainHNet(config, backend).to(device)
+        fixed_ratio = float(config["fixed_ratio"]) if kind == "hnet-fixed" else None
+        if fixed_ratio is not None and (not math.isfinite(fixed_ratio) or fixed_ratio <= 1):
+            raise ValueError("Fixed compression must be finite and greater than 1")
+        return PretrainHNet(config, backend, fixed_ratio).to(device)
     raise ValueError(f"Unknown pretraining model: {kind}")

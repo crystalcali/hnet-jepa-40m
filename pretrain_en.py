@@ -141,6 +141,9 @@ def train(args):
     if not 0 < config["batch_size"] or config["ratio_weight"] < 0:
         raise ValueError("Expected positive batch size and a nonnegative ratio weight")
     goal = info["bytes_per_bpe"]
+    if args.model == "hnet-fixed":
+        goal = args.fixed_ratio if args.fixed_ratio is not None else goal
+        config = {**config, "fixed_ratio": goal}
     torch.manual_seed(args.seed)
     rng = random.Random(args.seed)
     sampler = WindowSampler(windows, config["batch_size"], args.epochs, args.seed)
@@ -148,7 +151,8 @@ def train(args):
     config = {**config, "kind": args.model}
     batches = ByteBPEBatches(tokenizer, args.model, device)
     model = build_pretrain_model(args.model, config, info["vocab"], device).train()
-    print(f"{args.model}: {count_parameters(model):,} parameters; BPE target {goal:.4f} bytes/token", flush=True)
+    print(f"{args.model}: {count_parameters(model):,} parameters; "
+          f"measured BPE ratio {info['bytes_per_bpe']:.4f}, experiment target {goal:.4f}", flush=True)
     optimizer = runtime.adamw(model, device, config)
     root = args.run
     root.mkdir(parents=True, exist_ok=True)
@@ -218,7 +222,7 @@ def run_loop(args, state, sampler, model, optimizer, identity, config, windows, 
                 nll = F.cross_entropy(result.logits.float().flatten(0, 1), target.flatten())
                 loss = nll
                 terms = {"byte" if result.route is not None else "bpe": nll.detach()}
-                if result.route is not None:
+                if config["kind"] == "hnet":
                     ratio = ratio_loss(result.route, goal)
                     loss = loss + config["ratio_weight"] * ratio
                     terms["ratio"] = ratio.detach()
@@ -281,7 +285,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     p = commands.add_parser("train")
-    p.add_argument("--model", choices=("bpe", "hnet"), required=True)
+    p.add_argument("--model", choices=("bpe", "hnet", "hnet-fixed"), required=True)
+    p.add_argument("--fixed-ratio", type=float,
+                   help="Fixed H-Net target; defaults to the corpus BPE ratio")
     p.add_argument("--config", type=Path, default=Path("configs/pretrain_en.yaml"))
     p.add_argument("--data", type=Path, required=True)
     p.add_argument("--run", type=Path, required=True)
@@ -301,6 +307,8 @@ def main():
     e.add_argument("--device", choices=("cpu", "cuda"), default="cuda")
     args = parser.parse_args()
     if args.command == "train":
+        if args.fixed_ratio is not None and args.model != "hnet-fixed":
+            parser.error("--fixed-ratio requires --model hnet-fixed")
         if not (args.epochs >= 1 and args.val_every >= 1 and args.val_windows >= 0
                 and args.max_hours > 0 and (args.max_steps is None or args.max_steps >= 1)):
             parser.error("Specify positive training limits and a nonnegative validation window count")
