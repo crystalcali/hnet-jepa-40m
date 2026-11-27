@@ -88,3 +88,39 @@ for model in bpe hnet; do
     --data cache/txt360-en-500mb --checkpoint "runs/pretrain-en-$model/latest"
 done
 ```
+
+## Fixed chunk control
+
+The `hnet-fixed` model uses the same byte embedding, Mamba-2 stacks,
+Transformer core, residual merge and next-byte objective as `hnet`.
+With a matching seed its shared parameters start identically. It uses a
+deterministic grid of chunk starts, directly repeats the latest available
+chunk output, and has no router or ratio loss. At a fractional rate of
+3.75 the grid uses spans of three and four positions. No span can pass
+information backward to positions before its start. The fixed arm has
+38,204,064 parameters, 294,912 fewer than the dynamic arm.
+
+`--fixed-ratio` defaults to the train-only BPE ratio. For comparison with
+the existing dynamic checkpoint at step 1000, use `--fixed-ratio 3.75`,
+rounded from its observed validation compression (3.7453). Both models
+then read the same windows and start from the same shared weights.
+Check actual validation compression, BPB, estimated FLOPs and elapsed
+time. Differences include the dynamic path's confidence-weighted
+smoothing and router loss. This control measures the effect of the full
+dynamic routing path.
+
+```bash
+export TRITON_PTXAS_PATH=/usr/local/cuda-13.0/bin/ptxas
+export TRITON_PTXAS_BLACKWELL_PATH="$TRITON_PTXAS_PATH"
+
+bash scripts/spark-native.sh run python3 pretrain_en.py train \
+  --model hnet-fixed --fixed-ratio 3.75 --data cache/txt360-en-500mb \
+  --run runs/pretrain-en-hnet-fixed --max-steps 1000
+
+bash scripts/spark-native.sh run python3 pretrain_en.py eval \
+  --data cache/txt360-en-500mb --split test \
+  --checkpoint runs/pretrain-en-hnet-fixed/checkpoints/step-000001000
+```
+
+For a resume, pass the same `--fixed-ratio` with `--resume`. The dashboard
+lists the fixed arm as a separate run.
