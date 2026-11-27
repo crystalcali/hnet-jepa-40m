@@ -3,6 +3,8 @@
 Байтовая H-Net с тремя уровнями сжатия, рекуррентным ядром и JEPA. Целевая
 машина — NVIDIA DGX Spark. [ТЗ](SPEC.md) · [План](PLAN.md) · [Решения и статус](DECISIONS.md)
 
+**Новый эксперимент:** [англоязычное сравнение BPE Transformer и одноуровневой H-Net](docs/pretrain_en.md).
+
 ## 1. Окружение и CUDA smoke-test на Spark
 
 ### Установка без Docker
